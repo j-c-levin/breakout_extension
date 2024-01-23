@@ -67,7 +67,7 @@ fn main() {
                 // `chain`ing systems together runs them in order
                 .chain(),
         )
-        .add_systems(Update, (update_scoreboard, bevy::window::close_on_esc))
+        .add_systems(Update, (update_scoreboard, bevy::window::close_on_esc, waiting_to_begin))
         .run();
 }
 
@@ -170,6 +170,9 @@ struct Scoreboard {
     score: usize,
 }
 
+#[derive(Component)]
+struct WaitingToBegin;
+
 // Add the game's entities to our world
 fn setup(
     mut commands: Commands,
@@ -201,7 +204,7 @@ fn setup(
             ..default()
         },
         Paddle,
-        Collider,
+        Collider
     ));
 
     // Ball
@@ -213,7 +216,8 @@ fn setup(
             ..default()
         },
         Ball,
-        Velocity(INITIAL_BALL_DIRECTION.normalize() * BALL_SPEED),
+        Velocity(Vec2::ZERO),
+        WaitingToBegin
     ));
 
     // Scoreboard
@@ -340,6 +344,19 @@ fn apply_velocity(mut query: Query<(&mut Transform, &Velocity)>, time: Res<Time>
 fn update_scoreboard(scoreboard: Res<Scoreboard>, mut query: Query<&mut Text>) {
     let mut text = query.single_mut();
     text.sections[1].value = scoreboard.score.to_string();
+}
+
+fn waiting_to_begin(
+    keyboard_input: Res<Input<KeyCode>>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut Velocity), With<WaitingToBegin>>,
+) {
+    for (entity, mut ball_velocity) in &mut query {
+        if keyboard_input.any_just_pressed([KeyCode::Left, KeyCode::Right]) {
+            ball_velocity.0 = INITIAL_BALL_DIRECTION.normalize() * BALL_SPEED;
+            commands.entity(entity).remove::<WaitingToBegin>();
+        }
+    }
 }
 
 fn check_for_collisions(
