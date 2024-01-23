@@ -204,7 +204,7 @@ fn setup(
             ..default()
         },
         Paddle,
-        Collider
+        Collider,
     ));
 
     // Ball
