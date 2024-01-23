@@ -10,6 +10,8 @@ use bevy::{
 // Using the default 2D camera they correspond 1:1 with screen pixels.
 const PADDLE_SIZE: Vec3 = Vec3::new(120.0, 20.0, 0.0);
 const GAP_BETWEEN_PADDLE_AND_FLOOR: f32 = 60.0;
+
+const PADDLE_Y: f32 = BOTTOM_WALL + GAP_BETWEEN_PADDLE_AND_FLOOR;
 const PADDLE_SPEED: f32 = 500.0;
 // How close can the paddle get to the wall
 const PADDLE_PADDING: f32 = 10.0;
@@ -60,6 +62,7 @@ fn main() {
             FixedUpdate,
             (
                 apply_velocity,
+                check_for_game_over,
                 move_paddle,
                 check_for_collisions,
                 play_collision_sound,
@@ -67,7 +70,13 @@ fn main() {
                 // `chain`ing systems together runs them in order
                 .chain(),
         )
-        .add_systems(Update, (update_scoreboard, bevy::window::close_on_esc, waiting_to_begin))
+        .add_systems(Update,
+                     (
+                         update_scoreboard,
+                         bevy::window::close_on_esc,
+                         waiting_to_begin
+                     ),
+        )
         .run();
 }
 
@@ -100,6 +109,9 @@ struct WallBundle {
     sprite_bundle: SpriteBundle,
     collider: Collider,
 }
+
+#[derive(Component)]
+struct GameOver;
 
 /// Which side of the arena is this wall located on?
 enum WallLocation {
@@ -188,12 +200,10 @@ fn setup(
     commands.insert_resource(CollisionSound(ball_collision_sound));
 
     // Paddle
-    let paddle_y = BOTTOM_WALL + GAP_BETWEEN_PADDLE_AND_FLOOR;
-
     commands.spawn((
         SpriteBundle {
             transform: Transform {
-                translation: Vec3::new(0.0, paddle_y, 0.0),
+                translation: Vec3::new(0.0, PADDLE_Y, 0.0),
                 scale: PADDLE_SIZE,
                 ..default()
             },
@@ -248,12 +258,16 @@ fn setup(
     // Walls
     commands.spawn(WallBundle::new(WallLocation::Left));
     commands.spawn(WallBundle::new(WallLocation::Right));
-    commands.spawn(WallBundle::new(WallLocation::Bottom));
+    commands.spawn((WallBundle::new(WallLocation::Bottom), GameOver));
     commands.spawn(WallBundle::new(WallLocation::Top));
 
+    spawn_bricks(commands);
+}
+
+fn spawn_bricks(mut commands: Commands) {
     // Bricks
     let total_width_of_bricks = (RIGHT_WALL - LEFT_WALL) - 2. * GAP_BETWEEN_BRICKS_AND_SIDES;
-    let bottom_edge_of_bricks = paddle_y + GAP_BETWEEN_PADDLE_AND_BRICKS;
+    let bottom_edge_of_bricks = PADDLE_Y + GAP_BETWEEN_PADDLE_AND_BRICKS;
     let total_height_of_bricks = TOP_WALL - bottom_edge_of_bricks - GAP_BETWEEN_BRICKS_AND_CEILING;
 
     assert!(total_width_of_bricks > 0.0);
@@ -429,4 +443,37 @@ fn play_collision_sound(
             settings: PlaybackSettings::DESPAWN,
         });
     }
+}
+
+fn check_for_game_over(
+    mut commands: Commands,
+    mut scoreboard: ResMut<Scoreboard>,
+    mut ball_query: Query<(Entity, &mut Transform, &mut Velocity), (With<Ball>, Without<GameOver>)>,
+    mut bottom_wall: Query<&Transform, With<GameOver>>,
+    bricks: Query<Entity, With<Brick>>,
+) {
+    let (ball_entity, mut ball_transform, mut ball_velocity) = ball_query.single_mut();
+    let bottom_wall_transform = bottom_wall.single_mut();
+
+    let collision = collide(ball_transform.translation,
+                            ball_transform.scale.truncate(),
+                            bottom_wall_transform.translation,
+                            bottom_wall_transform.scale.truncate(),
+    );
+
+    if collision == None {
+        return;
+    }
+
+    // Ball has hit the bottom wall, reset it all
+    ball_velocity.0 = Vec2::ZERO;
+    ball_transform.translation = BALL_STARTING_POSITION;
+    commands.entity(ball_entity).insert(WaitingToBegin);
+
+    for brick in &bricks {
+        commands.entity(brick).despawn();
+    }
+    spawn_bricks(commands);
+
+    scoreboard.score = 0;
 }
