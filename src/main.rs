@@ -384,7 +384,6 @@ fn apply_velocity(
                 velocity.x = velocity.x.min(-BALL_SPEED);
             }
         }
-        println!("{:?}", velocity);
     }
 }
 
@@ -468,7 +467,10 @@ fn check_for_collisions(
                     Collision::Right => reflect_x = ball_velocity.x < 0.0,
                     Collision::Top => reflect_y = ball_velocity.y < 0.0,
                     Collision::Bottom => reflect_y = ball_velocity.y > 0.0,
-                    Collision::Inside => { /* do nothing */ }
+                    Collision::Inside => {
+                        reflect_x = true;
+                        reflect_y = true;
+                    }
                 }
 
                 // reflect velocity on the x-axis if we hit something on the x-axis
@@ -479,6 +481,11 @@ fn check_for_collisions(
                 // reflect velocity on the y-axis if we hit something on the y-axis
                 if reflect_y {
                     ball_velocity.y = -ball_velocity.y;
+                }
+
+                // The paddle can only reflect upwards
+                if maybe_paddle.is_some() && ball_velocity.y < 0.0 {
+                    ball_velocity.y = ball_velocity.y.abs();
                 }
             }
         }
@@ -505,12 +512,14 @@ fn play_collision_sound(
 fn check_for_game_over(
     mut commands: Commands,
     mut scoreboard: ResMut<Scoreboard>,
-    mut ball_query: Query<(Entity, &mut Transform, &mut Velocity), (With<Ball>, Without<GameOver>)>,
-    mut bottom_wall: Query<&Transform, With<GameOver>>,
+    mut ball_query: Query<(Entity, &mut Transform, &mut Velocity), (With<Ball>, Without<GameOver>, Without<Paddle>)>,
+    mut bottom_wall: Query<&Transform, (With<GameOver>,Without<Ball>, Without<Paddle>)>,
+    mut paddle_query: Query<&mut Transform, With<Paddle>>,
     bricks: Query<Entity, With<Brick>>,
 ) {
     let (ball_entity, mut ball_transform, mut ball_velocity) = ball_query.single_mut();
     let bottom_wall_transform = bottom_wall.single_mut();
+    let mut paddle_transform = paddle_query.single_mut();
 
     let collision = collide(ball_transform.translation,
                             ball_transform.scale.truncate(),
@@ -532,6 +541,7 @@ fn check_for_game_over(
     }
     spawn_bricks(commands);
 
+    paddle_transform.translation.x = 0.0;
 
     scoreboard.score = 0;
 }
