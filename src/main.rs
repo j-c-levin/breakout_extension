@@ -24,7 +24,8 @@ const BALL_SIZE: Vec3 = Vec3::new(30.0, 30.0, 0.0);
 const BALL_SPEED: f32 = 400.0;
 const HOT_ZONE_BALL_SPEED: f32 = 1200.0;
 const AIR_RESISTANCE: f32 = 15.0;
-const INITIAL_BALL_DIRECTION: Vec2 = Vec2::new(0.5, -0.5);//(0.5, -0.5);
+const INITIAL_BALL_DIRECTION: Vec2 = Vec2::new(0.5, -0.5);
+//(0.5, -0.5);
 const WALL_THICKNESS: f32 = 10.0;
 // x coordinates
 const LEFT_WALL: f32 = -450.;
@@ -112,6 +113,7 @@ struct WallBundle {
     sprite_bundle: SpriteBundle,
     collider: Collider,
     wall: Wall,
+    wall_location: Location
 }
 
 #[derive(Component)]
@@ -121,12 +123,16 @@ struct GameOver;
 struct Piercing;
 
 /// Which side of the arena is this wall located on?
+#[derive(Debug)]
 enum WallLocation {
     Left,
     Right,
     Bottom,
     Top,
 }
+
+#[derive(Component, Debug)]
+struct Location(WallLocation);
 
 impl WallLocation {
     fn position(&self) -> Vec2 {
@@ -154,6 +160,15 @@ impl WallLocation {
             }
         }
     }
+
+    fn location(&self) -> Location {
+        match self {
+            WallLocation::Left => Location(WallLocation::Left),
+            WallLocation::Right => Location(WallLocation::Right),
+            WallLocation::Bottom => Location(WallLocation::Bottom),
+            WallLocation::Top =>Location(WallLocation::Top),
+        }
+    }
 }
 
 impl WallBundle {
@@ -161,6 +176,7 @@ impl WallBundle {
     // making our code easier to read and less prone to bugs when we change the logic
     fn new(location: WallLocation) -> WallBundle {
         WallBundle {
+            wall_location: location.location(),
             sprite_bundle: SpriteBundle {
                 transform: Transform {
                     // We need to convert our Vec2 into a Vec3, by giving it a z-coordinate
@@ -398,7 +414,7 @@ fn waiting_to_begin(
     mut query: Query<(Entity, &mut Velocity), With<WaitingToBegin>>,
 ) {
     for (entity, mut ball_velocity) in &mut query {
-        if keyboard_input.any_just_pressed([KeyCode::Left, KeyCode::Right]) {
+        if keyboard_input.any_pressed([KeyCode::Left, KeyCode::Right]) {
             ball_velocity.0 = INITIAL_BALL_DIRECTION.normalize() * BALL_SPEED;
             commands.entity(entity).remove::<WaitingToBegin>();
         }
@@ -409,14 +425,14 @@ fn check_for_collisions(
     mut commands: Commands,
     mut scoreboard: ResMut<Scoreboard>,
     mut ball_query: Query<(Entity, &mut Velocity, &Transform, Option<&Piercing>), With<Ball>>,
-    collider_query: Query<(Entity, &Transform, Option<&Brick>, Option<&Paddle>, Option<&Wall>), With<Collider>>,
+    collider_query: Query<(Entity, &Transform, Option<&Brick>, Option<&Paddle>, Option<&Wall>, Option<&Location>), With<Collider>>,
     mut collision_events: EventWriter<CollisionEvent>,
 ) {
     let (ball_entity, mut ball_velocity, ball_transform, maybe_piercing) = ball_query.single_mut();
     let ball_size = ball_transform.scale.truncate();
 
     // check collision with walls
-    for (collider_entity, transform, maybe_brick, maybe_paddle, maybe_wall) in &collider_query {
+    for (collider_entity, transform, maybe_brick, maybe_paddle, maybe_wall, maybe_location) in &collider_query {
         let collision = collide(
             ball_transform.translation,
             ball_size,
@@ -445,6 +461,11 @@ fn check_for_collisions(
                 reflect = true;
             }
 
+            if maybe_piercing.is_some() && maybe_paddle.is_some() {
+                // we've messed up, recover!
+                reflect = true;
+            }
+
             if maybe_paddle.is_some() {
                 let distance_from_center = (ball_transform.translation.x - transform.translation.x).abs();
                 if distance_from_center > PADDLE_HOT_ZONE {
@@ -468,8 +489,17 @@ fn check_for_collisions(
                     Collision::Top => reflect_y = ball_velocity.y < 0.0,
                     Collision::Bottom => reflect_y = ball_velocity.y > 0.0,
                     Collision::Inside => {
-                        reflect_x = true;
-                        reflect_y = true;
+                        // We've ended up inside a wall, set the velocity accordingly
+                        if maybe_wall.is_some() {
+                            match maybe_location.unwrap().0 {
+                                WallLocation::Left => { ball_velocity.x = ball_velocity.x.abs(); }
+                                WallLocation::Right => { ball_velocity.x = -ball_velocity.x.abs(); }
+                                WallLocation::Bottom => { /* do nothing, game is over */ }
+                                WallLocation::Top => { ball_velocity.y = -ball_velocity.y.abs(); }
+                            }
+                            return;
+                        }
+
                     }
                 }
 
@@ -510,10 +540,11 @@ fn play_collision_sound(
 }
 
 fn check_for_game_over(
+    mut keyboard_input: ResMut<Input<KeyCode>>,
     mut commands: Commands,
     mut scoreboard: ResMut<Scoreboard>,
     mut ball_query: Query<(Entity, &mut Transform, &mut Velocity), (With<Ball>, Without<GameOver>, Without<Paddle>)>,
-    mut bottom_wall: Query<&Transform, (With<GameOver>,Without<Ball>, Without<Paddle>)>,
+    mut bottom_wall: Query<&Transform, (With<GameOver>, Without<Ball>, Without<Paddle>)>,
     mut paddle_query: Query<&mut Transform, With<Paddle>>,
     bricks: Query<Entity, With<Brick>>,
 ) {
@@ -544,4 +575,6 @@ fn check_for_game_over(
     paddle_transform.translation.x = 0.0;
 
     scoreboard.score = 0;
+
+    keyboard_input.clear();
 }
