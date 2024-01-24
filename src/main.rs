@@ -477,3 +477,24 @@ fn check_for_game_over(
 
     scoreboard.score = 0;
 }
+
+fn check_for_hot_zone_collision(
+    mut ball_query: Query<(&Transform, &mut Velocity), (With<Ball>, Without<Paddle>)>,
+    paddle_query: Query<&Transform, With<Paddle>>,
+) {
+    let (ball_transform, mut ball_velocity) = ball_query.single_mut();
+    let paddle_transform = paddle_query.single();
+
+    let collision = collide(
+        ball_transform.translation,
+        ball_transform.scale.truncate(),
+        paddle_transform.translation,
+        paddle_transform.scale.truncate()
+    );
+
+    if collision == None {
+        return;
+    }
+
+    // Ball has hit paddle, check for hot zone collision
+}
