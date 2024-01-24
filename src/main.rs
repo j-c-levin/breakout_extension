@@ -67,6 +67,7 @@ fn main() {
                 move_paddle,
                 check_for_collisions,
                 play_collision_sound,
+                check_for_game_win
             )
                 // `chain`ing systems together runs them in order
                 .chain(),
@@ -75,7 +76,8 @@ fn main() {
                      (
                          update_scoreboard,
                          bevy::window::close_on_esc,
-                         waiting_to_begin
+                         waiting_to_begin,
+                         animate_rotation
                      ),
         )
         .run();
@@ -113,7 +115,7 @@ struct WallBundle {
     sprite_bundle: SpriteBundle,
     collider: Collider,
     wall: Wall,
-    wall_location: Location
+    wall_location: Location,
 }
 
 #[derive(Component)]
@@ -166,7 +168,7 @@ impl WallLocation {
             WallLocation::Left => Location(WallLocation::Left),
             WallLocation::Right => Location(WallLocation::Right),
             WallLocation::Bottom => Location(WallLocation::Bottom),
-            WallLocation::Top =>Location(WallLocation::Top),
+            WallLocation::Top => Location(WallLocation::Top),
         }
     }
 }
@@ -208,6 +210,10 @@ struct Scoreboard {
 
 #[derive(Component)]
 struct WaitingToBegin;
+
+#[derive(Component)]
+struct AnimateRotation;
+
 
 // Add the game's entities to our world
 fn setup(
@@ -403,7 +409,9 @@ fn apply_velocity(
     }
 }
 
-fn update_scoreboard(scoreboard: Res<Scoreboard>, mut query: Query<&mut Text>) {
+fn update_scoreboard(
+    scoreboard: Res<Scoreboard>,
+    mut query: Query<&mut Text, Without<AnimateRotation>>) {
     let mut text = query.single_mut();
     text.sections[1].value = scoreboard.score.to_string();
 }
@@ -499,7 +507,6 @@ fn check_for_collisions(
                             }
                             return;
                         }
-
                     }
                 }
 
@@ -547,6 +554,7 @@ fn check_for_game_over(
     mut bottom_wall: Query<&Transform, (With<GameOver>, Without<Ball>, Without<Paddle>)>,
     mut paddle_query: Query<&mut Transform, With<Paddle>>,
     bricks: Query<Entity, With<Brick>>,
+    end_text: Query<Entity, With<AnimateRotation>>,
 ) {
     let (ball_entity, mut ball_transform, mut ball_velocity) = ball_query.single_mut();
     let bottom_wall_transform = bottom_wall.single_mut();
@@ -567,6 +575,11 @@ fn check_for_game_over(
     ball_transform.translation = BALL_STARTING_POSITION;
     commands.entity(ball_entity).insert(WaitingToBegin);
 
+    if end_text.iter().len() > 0 {
+        let end_text_entity = end_text.single();
+        commands.entity(end_text_entity).despawn();
+    }
+
     for brick in &bricks {
         commands.entity(brick).despawn();
     }
@@ -577,4 +590,35 @@ fn check_for_game_over(
     scoreboard.score = 0;
 
     keyboard_input.clear();
+}
+
+fn check_for_game_win(
+    mut commands: Commands,
+    bricks: Query<With<Brick>>,
+    end_text: Query<With<AnimateRotation>>,
+) {
+    if bricks.iter().len() == 0 && end_text.iter().len() == 0 {
+        commands.spawn((
+            Text2dBundle {
+                text: Text::from_section("YOU WIN!!",
+                                         TextStyle {
+                                             font_size: 100.0,
+                                             color: Color::MAROON,
+                                             ..default()
+                                         })
+                    .with_alignment(TextAlignment::Center),
+                ..default()
+            },
+            AnimateRotation,
+        ));
+    }
+}
+
+fn animate_rotation(
+    time: Res<Time>,
+    mut query: Query<&mut Transform, (With<Text>, With<AnimateRotation>)>,
+) {
+    for mut transform in &mut query {
+        transform.rotation = Quat::from_rotation_z(time.elapsed_seconds().cos());
+    }
 }
