@@ -15,12 +15,15 @@ const PADDLE_Y: f32 = BOTTOM_WALL + GAP_BETWEEN_PADDLE_AND_FLOOR;
 const PADDLE_SPEED: f32 = 500.0;
 // How close can the paddle get to the wall
 const PADDLE_PADDING: f32 = 10.0;
+// where are the "hot zones" on the paddle edges
+const PADDLE_HOT_ZONE: f32 = (PADDLE_SIZE.x / 2.0) * 0.8;
 
 // We set the z-value of the ball to 1 so it renders on top in the case of overlapping sprites.
 const BALL_STARTING_POSITION: Vec3 = Vec3::new(0.0, -50.0, 1.0);
 const BALL_SIZE: Vec3 = Vec3::new(30.0, 30.0, 0.0);
 const BALL_SPEED: f32 = 400.0;
-const INITIAL_BALL_DIRECTION: Vec2 = Vec2::new(0.5, -0.5);
+const HOT_ZONE_BALL_SPEED: f32 = 1200.0;
+const INITIAL_BALL_DIRECTION: Vec2 = Vec2::new(0.0, -0.5);//(0.5, -0.5);
 
 const WALL_THICKNESS: f32 = 10.0;
 // x coordinates
@@ -101,6 +104,9 @@ struct Brick;
 #[derive(Resource)]
 struct CollisionSound(Handle<AudioSource>);
 
+#[derive(Component)]
+struct Wall;
+
 // This bundle is a collection of the components that define a "wall" in our game
 #[derive(Bundle)]
 struct WallBundle {
@@ -108,10 +114,14 @@ struct WallBundle {
     // Allowing you to compose their functionality
     sprite_bundle: SpriteBundle,
     collider: Collider,
+    wall: Wall,
 }
 
 #[derive(Component)]
 struct GameOver;
+
+#[derive(Component)]
+struct Piercing;
 
 /// Which side of the arena is this wall located on?
 enum WallLocation {
@@ -172,6 +182,7 @@ impl WallBundle {
                 ..default()
             },
             collider: Collider,
+            wall: Wall,
         }
     }
 }
@@ -376,15 +387,15 @@ fn waiting_to_begin(
 fn check_for_collisions(
     mut commands: Commands,
     mut scoreboard: ResMut<Scoreboard>,
-    mut ball_query: Query<(&mut Velocity, &Transform), With<Ball>>,
-    collider_query: Query<(Entity, &Transform, Option<&Brick>, Option<&Paddle>), With<Collider>>,
+    mut ball_query: Query<(Entity, &mut Velocity, &Transform, Option<&Piercing>), With<Ball>>,
+    collider_query: Query<(Entity, &Transform, Option<&Brick>, Option<&Paddle>, Option<&Wall>), With<Collider>>,
     mut collision_events: EventWriter<CollisionEvent>,
 ) {
-    let (mut ball_velocity, ball_transform) = ball_query.single_mut();
+    let (ball_entity, mut ball_velocity, ball_transform, maybe_piercing) = ball_query.single_mut();
     let ball_size = ball_transform.scale.truncate();
 
     // check collision with walls
-    for (collider_entity, transform, maybe_brick, maybe_paddle) in &collider_query {
+    for (collider_entity, transform, maybe_brick, maybe_paddle, maybe_wall) in &collider_query {
         let collision = collide(
             ball_transform.translation,
             ball_size,
@@ -392,55 +403,61 @@ fn check_for_collisions(
             transform.scale.truncate(),
         );
 
-        if collision.is_none() {
-            return;
+        if let Some(collision) = collision {
+            // Sends a collision event so that other systems can react to the collision
+            collision_events.send_default();
+
+            // Bricks should be despawned and increment the scoreboard on collision
+            if maybe_brick.is_some() {
+                scoreboard.score += 1;
+                commands.entity(collider_entity).despawn();
+            }
+
+            let mut reflect = true;
+
+            if maybe_piercing.is_some() {
+                reflect = false;
+            }
+
+            if maybe_piercing.is_some() && maybe_wall.is_some() {
+                commands.entity(ball_entity).remove::<Piercing>();
+                reflect = true;
+            }
+
+            if reflect {
+                // reflect the ball when it collides
+                let mut reflect_x = false;
+                let mut reflect_y = false;
+
+                // only reflect if the ball's velocity is going in the opposite direction of the
+                // collision
+                match collision {
+                    Collision::Left => reflect_x = ball_velocity.x > 0.0,
+                    Collision::Right => reflect_x = ball_velocity.x < 0.0,
+                    Collision::Top => reflect_y = ball_velocity.y < 0.0,
+                    Collision::Bottom => reflect_y = ball_velocity.y > 0.0,
+                    Collision::Inside => { /* do nothing */ }
+                }
+
+                // reflect velocity on the x-axis if we hit something on the x-axis
+                if reflect_x {
+                    ball_velocity.x = -ball_velocity.x;
+                }
+
+                // reflect velocity on the y-axis if we hit something on the y-axis
+                if reflect_y {
+                    ball_velocity.y = -ball_velocity.y;
+                }
+
+                if maybe_paddle.is_some() {
+                    let distance_from_center = (ball_transform.translation.x - transform.translation.x).abs();
+                    if distance_from_center > PADDLE_HOT_ZONE {
+                        ball_velocity.0 = ball_velocity.0.normalize() * HOT_ZONE_BALL_SPEED;
+                        commands.entity(ball_entity).insert(Piercing);
+                    }
+                }
+            }
         }
-
-        let collision = collision.unwrap();
-
-        // Sends a collision event so that other systems can react to the collision
-        collision_events.send_default();
-
-        // Bricks should be despawned and increment the scoreboard on collision
-        if maybe_brick.is_some() {
-            scoreboard.score += 1;
-            commands.entity(collider_entity).despawn();
-        }
-
-        // reflect the ball when it collides
-        let mut reflect_x = false;
-        let mut reflect_y = false;
-
-        // only reflect if the ball's velocity is going in the opposite direction of the
-        // collision
-        match collision {
-            Collision::Left => reflect_x = ball_velocity.x > 0.0,
-            Collision::Right => reflect_x = ball_velocity.x < 0.0,
-            Collision::Top => reflect_y = ball_velocity.y < 0.0,
-            Collision::Bottom => reflect_y = ball_velocity.y > 0.0,
-            Collision::Inside => { /* do nothing */ }
-        }
-
-        // reflect velocity on the x-axis if we hit something on the x-axis
-        if reflect_x {
-            ball_velocity.x = -ball_velocity.x;
-        }
-
-        // reflect velocity on the y-axis if we hit something on the y-axis
-        if reflect_y {
-            ball_velocity.y = -ball_velocity.y;
-        }
-
-        // check if the ball hit a hot zone
-        // if maybe_paddle.is_none() {
-        //     return;
-        // }
-        //
-        // let distance_from_center = (ball_transform.translation.x - transform.translation.x).abs();
-        // if distance_from_center > (PADDLE_SIZE.x * 0.9) {
-        //     ball_velocity.0.x *= 3.0;
-        //     ball_velocity.0.y *= 3.0;
-        // }
     }
 }
 
@@ -490,6 +507,7 @@ fn check_for_game_over(
         commands.entity(brick).despawn();
     }
     spawn_bricks(commands);
+
 
     scoreboard.score = 0;
 }
