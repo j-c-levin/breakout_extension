@@ -23,8 +23,8 @@ const BALL_STARTING_POSITION: Vec3 = Vec3::new(0.0, -50.0, 1.0);
 const BALL_SIZE: Vec3 = Vec3::new(30.0, 30.0, 0.0);
 const BALL_SPEED: f32 = 400.0;
 const HOT_ZONE_BALL_SPEED: f32 = 1200.0;
+const AIR_RESISTANCE: f32 = 300.0;
 const INITIAL_BALL_DIRECTION: Vec2 = Vec2::new(0.0, -0.5);//(0.5, -0.5);
-
 const WALL_THICKNESS: f32 = 10.0;
 // x coordinates
 const LEFT_WALL: f32 = -450.;
@@ -359,10 +359,31 @@ fn move_paddle(
     paddle_transform.translation.x = new_paddle_position.clamp(left_bound, right_bound);
 }
 
-fn apply_velocity(mut query: Query<(&mut Transform, &Velocity)>, time: Res<Time>) {
-    for (mut transform, velocity) in &mut query {
-        transform.translation.x += velocity.x * time.delta_seconds();
-        transform.translation.y += velocity.y * time.delta_seconds();
+fn apply_velocity(
+    mut query: Query<(&mut Transform, &mut Velocity, Option<&Piercing>), With<Ball>>,
+    time: Res<Time>,
+) {
+    let (mut transform, mut velocity, maybe_piercing) = query.single_mut();
+
+    transform.translation.x += velocity.x * time.delta_seconds();
+    transform.translation.y += velocity.y * time.delta_seconds();
+
+    if maybe_piercing.is_none() {
+        if velocity.x > 0.0 {
+            velocity.x -= AIR_RESISTANCE;
+            velocity.x = velocity.x.max(BALL_SPEED);
+        } else {
+            velocity.x += AIR_RESISTANCE;
+            velocity.x = velocity.x.min(-BALL_SPEED);
+        }
+
+        if velocity.y > 0.0 {
+            velocity.y -= AIR_RESISTANCE;
+            velocity.y = velocity.y.max(BALL_SPEED);
+        } else {
+            velocity.y += AIR_RESISTANCE;
+            velocity.y = velocity.y.min(-BALL_SPEED);
+        }
     }
 }
 
@@ -421,8 +442,17 @@ fn check_for_collisions(
 
             if maybe_piercing.is_some() && maybe_wall.is_some() {
                 commands.entity(ball_entity).remove::<Piercing>();
-                ball_velocity.0 = ball_velocity.0.normalize() * BALL_SPEED;
                 reflect = true;
+            }
+
+            if maybe_paddle.is_some() {
+                let distance_from_center = (ball_transform.translation.x - transform.translation.x).abs();
+                if distance_from_center > PADDLE_HOT_ZONE {
+                    ball_velocity.0 = ball_velocity.0.normalize() * HOT_ZONE_BALL_SPEED;
+                    commands.entity(ball_entity).insert(Piercing);
+                    reflect = false;
+                    ball_velocity.y = -ball_velocity.y;
+                }
             }
 
             if reflect {
@@ -448,14 +478,6 @@ fn check_for_collisions(
                 // reflect velocity on the y-axis if we hit something on the y-axis
                 if reflect_y {
                     ball_velocity.y = -ball_velocity.y;
-                }
-
-                if maybe_paddle.is_some() {
-                    let distance_from_center = (ball_transform.translation.x - transform.translation.x).abs();
-                    if distance_from_center > PADDLE_HOT_ZONE {
-                        ball_velocity.0 = ball_velocity.0.normalize() * HOT_ZONE_BALL_SPEED;
-                        commands.entity(ball_entity).insert(Piercing);
-                    }
                 }
             }
         }
