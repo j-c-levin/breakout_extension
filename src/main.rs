@@ -16,15 +16,15 @@ const PADDLE_SPEED: f32 = 500.0;
 // How close can the paddle get to the wall
 const PADDLE_PADDING: f32 = 10.0;
 // where are the "hot zones" on the paddle edges
-const PADDLE_HOT_ZONE: f32 = (PADDLE_SIZE.x / 2.0) * 0.8;
+const PADDLE_HOT_ZONE: f32 = (PADDLE_SIZE.x / 2.0) * 0.7;
 
 // We set the z-value of the ball to 1 so it renders on top in the case of overlapping sprites.
 const BALL_STARTING_POSITION: Vec3 = Vec3::new(0.0, -50.0, 1.0);
 const BALL_SIZE: Vec3 = Vec3::new(30.0, 30.0, 0.0);
 const BALL_SPEED: f32 = 400.0;
 const HOT_ZONE_BALL_SPEED: f32 = 1200.0;
-const AIR_RESISTANCE: f32 = 300.0;
-const INITIAL_BALL_DIRECTION: Vec2 = Vec2::new(0.0, -0.5);//(0.5, -0.5);
+const AIR_RESISTANCE: f32 = 15.0;
+const INITIAL_BALL_DIRECTION: Vec2 = Vec2::new(0.5, -0.5);//(0.5, -0.5);
 const WALL_THICKNESS: f32 = 10.0;
 // x coordinates
 const LEFT_WALL: f32 = -450.;
@@ -32,7 +32,6 @@ const RIGHT_WALL: f32 = 450.;
 // y coordinates
 const BOTTOM_WALL: f32 = -300.;
 const TOP_WALL: f32 = 300.;
-
 const BRICK_SIZE: Vec2 = Vec2::new(100., 30.);
 // These values are exact
 const GAP_BETWEEN_PADDLE_AND_BRICKS: f32 = 270.0;
@@ -40,10 +39,8 @@ const GAP_BETWEEN_BRICKS: f32 = 5.0;
 // These values are lower bounds, as the number of bricks is computed
 const GAP_BETWEEN_BRICKS_AND_CEILING: f32 = 20.0;
 const GAP_BETWEEN_BRICKS_AND_SIDES: f32 = 20.0;
-
 const SCOREBOARD_FONT_SIZE: f32 = 40.0;
 const SCOREBOARD_TEXT_PADDING: Val = Val::Px(5.0);
-
 const BACKGROUND_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
 const PADDLE_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
 const BALL_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
@@ -89,7 +86,7 @@ struct Paddle;
 #[derive(Component)]
 struct Ball;
 
-#[derive(Component, Deref, DerefMut)]
+#[derive(Component, Deref, DerefMut, Debug)]
 struct Velocity(Vec2);
 
 #[derive(Component)]
@@ -369,21 +366,25 @@ fn apply_velocity(
     transform.translation.y += velocity.y * time.delta_seconds();
 
     if maybe_piercing.is_none() {
-        if velocity.x > 0.0 {
-            velocity.x -= AIR_RESISTANCE;
-            velocity.x = velocity.x.max(BALL_SPEED);
-        } else {
-            velocity.x += AIR_RESISTANCE;
-            velocity.x = velocity.x.min(-BALL_SPEED);
+        if velocity.y.abs() > BALL_SPEED {
+            if velocity.y > BALL_SPEED {
+                velocity.y -= AIR_RESISTANCE;
+                velocity.y = velocity.y.max(BALL_SPEED);
+            } else {
+                velocity.y += AIR_RESISTANCE;
+                velocity.y = velocity.y.min(-BALL_SPEED);
+            }
         }
-
-        if velocity.y > 0.0 {
-            velocity.y -= AIR_RESISTANCE;
-            velocity.y = velocity.y.max(BALL_SPEED);
-        } else {
-            velocity.y += AIR_RESISTANCE;
-            velocity.y = velocity.y.min(-BALL_SPEED);
+        if velocity.x.abs() > BALL_SPEED {
+            if velocity.x > BALL_SPEED {
+                velocity.x -= AIR_RESISTANCE;
+                velocity.x = velocity.x.max(BALL_SPEED);
+            } else {
+                velocity.x += AIR_RESISTANCE;
+                velocity.x = velocity.x.min(-BALL_SPEED);
+            }
         }
+        println!("{:?}", velocity);
     }
 }
 
