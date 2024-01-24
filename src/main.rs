@@ -421,6 +421,7 @@ fn check_for_collisions(
 
             if maybe_piercing.is_some() && maybe_wall.is_some() {
                 commands.entity(ball_entity).remove::<Piercing>();
+                ball_velocity.0 = ball_velocity.0.normalize() * BALL_SPEED;
                 reflect = true;
             }
 
